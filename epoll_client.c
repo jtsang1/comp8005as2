@@ -28,7 +28,8 @@ Purpose:	COMP 8005 Assignment 2 - Comparing Scalable Servers -
 #include <arpa/inet.h>
 #include <netdb.h>
 
-#include <strings.h>
+#include <string.h>
+#include <sys/wait.h>
 
 #define BUFLEN 80
 
@@ -83,6 +84,25 @@ Usage: ./epoll_client\n\
 	else
 		printf("You entered -h %s -p %d -c %d -d %s -i %d\n",host, port, connections, data, iterations);
 	
+	/**********************************************************
+	Multi process
+	**********************************************************/
+	
+	int p, status;
+	pid_t pid = 0;
+	
+	for(p = 1;p < connections;p++)
+	{
+		if((pid = fork()) == -1)
+			SystemFatal("fork");
+		
+		if(pid == 0){
+			waitpid(pid,&status,0);
+		}
+		else{
+			break;
+		}
+	}
 	
 	/**********************************************************
 	Create socket
@@ -95,7 +115,7 @@ Usage: ./epoll_client\n\
 	if((sd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
 		SystemFatal("socket");
 	
-	bzero((char *)&server, sizeof(struct sockaddr_in));
+	memset(&server, 0, sizeof(struct sockaddr_in));
 	server.sin_family = AF_INET;
 	server.sin_port = htons(port);
 	if((hp = gethostbyname(host)) == NULL)
@@ -115,35 +135,45 @@ Usage: ./epoll_client\n\
 	printf("Connected: Server: %s\n", hp->h_name);
 	pptr = hp->h_addr_list;
 	printf("IP Address: %s\n", inet_ntop(hp->h_addrtype, *pptr, str, sizeof(str)));
-	printf("Transmit: %s\n", data);
 	
 	/**********************************************************
 	Send and receive data
 	**********************************************************/
 	
-	char rbuf[BUFLEN], sbuf[BUFLEN] = "abcde", * bp;
+	char rbuf[BUFLEN], sbuf[BUFLEN], * bp;
 	int bytes_to_read, n;
 	
+	strcpy(sbuf, data);	
 	//sbuf = data;
 	//sbuf = "abcde";
-	send(sd, sbuf, BUFLEN, 0);
+	int i;
 	
-	printf("Receive:\n");
-	bp = rbuf;
-	bytes_to_read = BUFLEN;
-	
-	//make repeated calls to recv until there is no more data
-	n = 0;
-	while((n = recv(sd,bp,bytes_to_read,0)) < BUFLEN)
+	//Send data <iterations> number of times 
+	for(i = 0;i < iterations;i++)
 	{
+		printf("Transmit: %s\t", data);
+		
+		send(sd, sbuf, BUFLEN, 0);
 	
-		bp += n;
+		printf("Receive: ");
+		bp = rbuf;
 		bytes_to_read = BUFLEN;
 	
-	}
+		//make repeated calls to recv until there is no more data
+		n = 0;
+		while((n = recv(sd,bp,bytes_to_read,0)) < BUFLEN)
+		{
 	
-	printf("%s\n", rbuf);
+			bp += n;
+			bytes_to_read = BUFLEN;
+	
+		}
+	
+		printf("%s\n", rbuf);
+	}
 	fflush(stdout);
+	
+	//shutdown(sd, SHUT_RDWR);
 	close(sd);
 		
 	return 0;
