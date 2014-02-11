@@ -28,6 +28,10 @@ Purpose:	COMP 8005 Assignment 2 - Comparing Scalable Servers -
 #include <arpa/inet.h>
 #include <netdb.h>
 
+#include <strings.h>
+
+#define BUFLEN 80
+
 static void SystemFatal(const char* message);
 
 int main (int argc, char ** argv)
@@ -65,6 +69,7 @@ int main (int argc, char ** argv)
 	}
 	
 	if(num_params < 4)
+	{
 		printf("\n\
 Usage: ./epoll_client\n\
 -h <address>\t\tSpecify host.\n\
@@ -72,6 +77,9 @@ Usage: ./epoll_client\n\
 -c <connections>\tNumber of connections to use.\n\
 -d <data>\t\tData to send.\n\
 -i <iterations>\t\tNumber of iterations to use.\n\n");
+
+		SystemFatal("params");
+	}
 	else
 		printf("You entered -h %s -p %d -c %d -d %s -i %d\n",host, port, connections, data, iterations);
 	
@@ -99,10 +107,45 @@ Usage: ./epoll_client\n\
 	Connect to server
 	**********************************************************/
 	
+	char ** pptr, str[16];
 	
+	if(connect(sd, (struct sockaddr *)&server, sizeof(server)) == -1)
+		SystemFatal("connect");
+		
+	printf("Connected: Server: %s\n", hp->h_name);
+	pptr = hp->h_addr_list;
+	printf("IP Address: %s\n", inet_ntop(hp->h_addrtype, *pptr, str, sizeof(str)));
+	printf("Transmit: %s\n", data);
 	
+	/**********************************************************
+	Send and receive data
+	**********************************************************/
 	
+	char rbuf[BUFLEN], sbuf[BUFLEN] = "abcde", * bp;
+	int bytes_to_read, n;
 	
+	//sbuf = data;
+	//sbuf = "abcde";
+	send(sd, sbuf, BUFLEN, 0);
+	
+	printf("Receive:\n");
+	bp = rbuf;
+	bytes_to_read = BUFLEN;
+	
+	//make repeated calls to recv until there is no more data
+	n = 0;
+	while((n = recv(sd,bp,bytes_to_read,0)) < BUFLEN)
+	{
+	
+		bp += n;
+		bytes_to_read = BUFLEN;
+	
+	}
+	
+	printf("%s\n", rbuf);
+	fflush(stdout);
+	close(sd);
+		
 	return 0;
 }
 
