@@ -33,10 +33,15 @@ Purpose:	COMP 8005 Assignment 2 - Comparing Scalable Servers -
 
 #define BUFLEN 80
 
+
+
 static void SystemFatal(const char* message);
 
 int main (int argc, char ** argv)
 {
+	// Remove the need to flush printf with "\n" everytime...
+	setbuf(stdout, NULL);
+
 	/**********************************************************
 	Parse input parameters
 	**********************************************************/
@@ -165,7 +170,7 @@ Usage: ./epoll_client\n\
 		{
 	
 			bp += n;
-			bytes_to_read = BUFLEN;
+			bytes_to_read -= n;
 	
 		}
 	
