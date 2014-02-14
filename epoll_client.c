@@ -93,21 +93,26 @@ Usage: ./epoll_client\n\
 	Multi process
 	**********************************************************/
 	
-	/*int p, status;
-	pid_t pid = 0;
+	int p, status;
+	pid_t * pid;
+	if((pid = malloc(sizeof(pid_t) * connections)) == NULL)
+		SystemFatal("malloc");
+	
+	pid[0] = getpid(); //parent is first process
 	
 	for(p = 1;p < connections;p++)
 	{
-		if((pid = fork()) == -1)
+		if((pid[p] = fork()) == -1)
 			SystemFatal("fork");
 		
-		if(pid == 0){
-			waitpid(pid,&status,0);
-		}
-		else{
+		if(pid[p] == 0){
+			//printf("Child: %d\n",getpid());
 			break;
 		}
-	}*/
+		else{
+			//parent continue generating children
+		}
+	}
 	
 	/**********************************************************
 	Create socket
@@ -132,14 +137,14 @@ Usage: ./epoll_client\n\
 	Connect to server
 	**********************************************************/
 	
-	char ** pptr, str[16];
+	//char ** pptr, str[16];
 	
 	if(connect(sd, (struct sockaddr *)&server, sizeof(server)) == -1)
 		SystemFatal("connect");
 		
-	printf("Connected: Server: %s\n", hp->h_name);
-	pptr = hp->h_addr_list;
-	printf("IP Address: %s\n", inet_ntop(hp->h_addrtype, *pptr, str, sizeof(str)));
+	//printf("Connected: Server: %s\n", hp->h_name);
+	//pptr = hp->h_addr_list;
+	//printf("IP Address: %s\n", inet_ntop(hp->h_addrtype, *pptr, str, sizeof(str)));
 	
 	/**********************************************************
 	Send and receive data
@@ -156,11 +161,11 @@ Usage: ./epoll_client\n\
 	//Send data <iterations> number of times 
 	for(i = 0;i < iterations;i++)
 	{
-		printf("Transmit: %s\t", data);
+		//printf("Transmit: %s\t", data);
 		
 		send(sd, sbuf, BUFLEN, 0);
 	
-		printf("Receive: ");
+		//printf("Receive: ");
 		bp = rbuf;
 		bytes_to_read = BUFLEN;
 	
@@ -174,12 +179,25 @@ Usage: ./epoll_client\n\
 	
 		}
 	
-		printf("%s\n", rbuf);
+		printf("(%d) Transmitted and Received: %s\n",getpid(), rbuf);
 	}
 	fflush(stdout);
 	
 	//shutdown(sd, SHUT_RDWR);
 	close(sd);
+	
+	/**********************************************************
+	Wait for child processes and free memory
+	**********************************************************/
+
+	if(pid[0] == getpid()){
+		for(p = 1; p < connections; p++){
+			//printf("waiting for child: %d",pid[p]);
+			waitpid(pid[p],&status,0);
+		}
+		printf("Parent %d at end.\n",getpid());
+		free(pid);
+	}
 		
 	return 0;
 }

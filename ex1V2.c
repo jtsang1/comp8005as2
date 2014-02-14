@@ -123,13 +123,13 @@ socklen_t client_len;
 	// queue up to 5 connect requests
 	listen(sd, 5);
 	
-	printf("after listen\n");
+	printf("Listening...\n");
 
 	client_len= sizeof(client);
 
 	while (TRUE)
 	{
-		int* new_sd = malloc(sizeof(int*));
+		int* new_sd = malloc(sizeof(int));
 		if ((*new_sd = accept (sd, (struct sockaddr *)&client, &client_len)) == -1)
 		{
 			fprintf(stderr, "Can't accept client\n");
@@ -137,14 +137,12 @@ socklen_t client_len;
 		}
 
 		printf(" Remote Address:  %s\n", inet_ntoa(client.sin_addr));
-			
-		printf("before thread creator\n");
 		
 		if ( pthread_create(&child, NULL, Child, (void*) new_sd) != 0 ){
-            		perror("Thread creation");
-        	} else{
-			printf("creating thread\n");
-           		pthread_join(child,NULL);
+    		perror("Thread creation");
+    	} else{
+			//printf("Creating thread\n");
+       		pthread_join(child,NULL);
 			
 			free(new_sd);
 		}
@@ -158,41 +156,33 @@ void* Child(void* arg)
     //int client = *(int *)arg;
     int new_sd = *(int*)arg;	
     char *bp, buf[BUFLEN];
-    int n = 0;
-    int m=0;    
-	
-	int x = 1;
-	
+    int n = 0, x = 1;
     bp = buf;
     bytes_to_read = BUFLEN;
 	
-	printf("reading loop\n");
-	
-	//while(TRUE){
-	while(fcntl(new_sd, F_GETFD)!= -1 && x){
-	printf("hihi%d\n",fcntl(new_sd, F_GETFD));
-		while (x){
-			n = recv (new_sd, bp, bytes_to_read, 0);
-			if(n != -1 && n < BUFLEN){
-				printf("going through loop n:%d\n", n);
-				bp += n;
-				bytes_to_read -= n;
-				m++;
-				printf("M count: %d\n",m);
-			} else{
+	while(1){
+		while(1){
+			n = recv(new_sd, bp, bytes_to_read, 0);
+			
+			if(n == BUFLEN)
+				break;
+			else{
+				//printf("breaking because n:%d\n",n);
 				x = 0;
+				break;
 			}
 		}
+		
+		if(x == 0)
+			break;
 	
 		printf ("sending:%s\n", buf);
-		
 		send(new_sd, buf, BUFLEN, 0);
-		sleep(2);
 	}
 	
     close(new_sd);
 	
-	printf("closing client connection\n");
+	//printf("closing client connection\n");
     return arg;
 }
 
