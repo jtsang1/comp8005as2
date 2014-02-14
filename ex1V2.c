@@ -17,6 +17,7 @@
 #define SERVER_TCP_PORT 7000	// Default port
 #define BUFLEN	80		//Buffer length
 #define TRUE	1
+#define MAX_CONNECTIONS 50000
 
 int new_sd;
 
@@ -121,7 +122,7 @@ socklen_t client_len;
 	// Listen for connections
 
 	// queue up to 5 connect requests
-	listen(sd, 5);
+	listen(sd, MAX_CONNECTIONS);
 	
 	printf("Listening...\n");
 
