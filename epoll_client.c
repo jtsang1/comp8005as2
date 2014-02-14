@@ -120,10 +120,14 @@ Usage: ./epoll_client\n\
 	
 	struct sockaddr_in server;
 	struct hostent * hp;
-	int sd;
+	int sd, arg = 1;
 	
 	if((sd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
 		SystemFatal("socket");
+		
+	// Set SO_REUSEADDR so port can be reused immediately
+	if(setsockopt(sd, SOL_SOCKET, SO_REUSEADDR, &arg, sizeof(arg)) == -1)
+		SystemFatal("setsockopt");
 	
 	memset(&server, 0, sizeof(struct sockaddr_in));
 	server.sin_family = AF_INET;
@@ -142,7 +146,7 @@ Usage: ./epoll_client\n\
 	if(connect(sd, (struct sockaddr *)&server, sizeof(server)) == -1)
 		SystemFatal("connect");
 		
-	//printf("Connected: Server: %s\n", hp->h_name);
+	printf("Connected: Server: %s\n", hp->h_name);
 	//pptr = hp->h_addr_list;
 	//printf("IP Address: %s\n", inet_ntop(hp->h_addrtype, *pptr, str, sizeof(str)));
 	

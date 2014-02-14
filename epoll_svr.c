@@ -57,11 +57,10 @@ void close_fd (int);
 int main (int argc, char* argv[]) 
 {
 	int i, arg; 
-	int num_fds, fd_new, epoll_fd;
+	int num_fds, epoll_fd;
 	static struct epoll_event events[EPOLL_QUEUE_LEN], event;
 	int port = SERVER_PORT;
-	struct sockaddr_in addr, remote_addr;
-	socklen_t addr_size = sizeof(struct sockaddr_in);
+	struct sockaddr_in addr;
 	struct sigaction act;
 	
 	// set up the signal handler to close the server socket when CTRL-c is received
@@ -116,54 +115,80 @@ int main (int argc, char* argv[])
 		//struct epoll_event events[MAX_EVENTS];
 		num_fds = epoll_wait (epoll_fd, events, EPOLL_QUEUE_LEN, -1);
 		if (num_fds < 0) 
-			SystemFatal ("Error in epoll_wait!");
+			SystemFatal ("epoll_wait");
 
 		for (i = 0; i < num_fds; i++) 
 		{
-	    		// Case 1: Error condition
-	    		if (events[i].events & (EPOLLHUP | EPOLLERR)) 
+	    		// EPOLLHUP
+	    		if (events[i].events & EPOLLHUP) 
 				{
-					fputs("epoll: EPOLLERR", stderr);
+					//fputs("epoll: EPOLLERR", stderr);
+					fprintf(stdout,"EPOLLHUP - closing fd: %d\n", events[i].data.fd);
+					close(events[i].data.fd);
+					continue;
+				}
+				
+				// EPOLLERR
+				if (events[i].events & EPOLLERR) 
+				{
+					fprintf(stdout,"EPOLLERR - closing fd: %d\n", events[i].data.fd);
 					close(events[i].data.fd);
 					continue;
 				}
 				
 	    		assert (events[i].events & EPOLLIN);
 
-	    		// Case 2: Server is receiving a connection request
+	    		// Server is receiving one or more incoming connection requests
 	    		if (events[i].data.fd == fd_server) 
 				{
-					//socklen_t addr_size = sizeof(remote_addr);
-					fd_new = accept (fd_server, (struct sockaddr*) &remote_addr, &addr_size);
-					if (fd_new == -1) 
-					{
-							if (errno != EAGAIN && errno != EWOULDBLOCK) 
+					while(1){
+									
+						struct sockaddr_in in_addr;
+						socklen_t in_len;
+						int fd_new = 0;
+						
+						fd_new = accept (fd_server, (struct sockaddr *)&in_addr, &in_len);
+						if (fd_new == -1) 
 						{
-							perror("accept");
+							if (errno != EAGAIN && errno != EWOULDBLOCK) 
+							{
+								// If error in accept call
+								perror("accept");
+								break;								
 							}
-							continue;
-					}
+							else{
+								// All connections have been processed
+								break;
+							}
+						}
+						fprintf(stdout,"ACCEPTED NEW fd: %d\n", fd_new);
 
-					// Make the fd_new non-blocking
-					if (fcntl (fd_new, F_SETFL, O_NONBLOCK | fcntl(fd_new, F_GETFL, 0)) == -1) 
-						SystemFatal("fcntl");
-				
-					// Add the new socket descriptor to the epoll loop
-					event.data.fd = fd_new;
-					if (epoll_ctl (epoll_fd, EPOLL_CTL_ADD, fd_new, &event) == -1) 
-						SystemFatal ("epoll_ctl");
-				
-					printf(" Remote Address:  %s\n", inet_ntoa(remote_addr.sin_addr));
-					continue;
-	    		}
-
-	    		// Case 3: One of the sockets has read data
-	    		if (!ClearSocket(events[i].data.fd)) 
-				{
+						// Make the fd_new non-blocking
+						if (fcntl (fd_new, F_SETFL, O_NONBLOCK | fcntl(fd_new, F_GETFL, 0)) == -1) 
+							SystemFatal("fcntl");
 					
-					// epoll will remove the fd from its set
-					// automatically when the fd is closed
-					close (events[i].data.fd);
+						// Add the new socket descriptor to the epoll loop
+						fprintf(stdout,"ADDING TO EPOLL fd: %d\n", fd_new);
+						
+						event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLET;
+						event.data.fd = fd_new;
+						if (epoll_ctl (epoll_fd, EPOLL_CTL_ADD, fd_new, &event) == -1) 
+							SystemFatal ("epoll_ctl");
+				
+						printf(" Remote Address:  %s\n", inet_ntoa(in_addr.sin_addr));
+						continue;
+					}
+	    		}
+	    		// Else one of the sockets has read data
+				else{
+					if (!ClearSocket(events[i].data.fd)) 
+					{
+					
+						// epoll will remove the fd from its set
+						// automatically when the fd is closed
+						fprintf(stdout,"CLOSING3 fd: %d\n", events[i].data.fd);
+						close (events[i].data.fd);
+					}
 				}
 			}
     	}
@@ -190,7 +215,7 @@ static int ClearSocket (int fd)
 		return FALSE;
 	
 	//printf ("sending:%s\tloops:%d\n", buf, m);
-	printf ("sending:%s\n", buf, m);
+	printf ("sending:%s\n", buf);
 
 	send (fd, buf, BUFLEN, 0);
 	//close (fd);
