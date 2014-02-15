@@ -19,11 +19,13 @@ Purpose:	COMP 8005 Assignment 2 - Comparing Scalable Servers -
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <ctype.h>
 #include <sys/types.h>
 
 #include <sys/socket.h>
+#include <sys/epoll.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -32,10 +34,16 @@ Purpose:	COMP 8005 Assignment 2 - Comparing Scalable Servers -
 #include <sys/wait.h>
 
 #define BUFLEN 80
-
+#define EPOLL_QUEUE_LEN 256 // Must be > 0. Only used for backward compatibility.
 
 
 static void SystemFatal(const char* message);
+
+struct custom_data{
+	int total;		// Total number of messages to send and receive
+	int sent;		// Number of messages sent
+	int received;	// Number of messages received
+};
 
 int main (int argc, char ** argv)
 {
@@ -90,71 +98,154 @@ Usage: ./epoll_client\n\
 		printf("You entered -h %s -p %d -c %d -d %s -i %d\n",host, port, connections, data, iterations);
 	
 	/**********************************************************
-	Multi process
+	Epoll init. Create all sockets and add to epoll event loop
 	**********************************************************/
 	
-	int p, status;
-	pid_t * pid;
-	if((pid = malloc(sizeof(pid_t) * connections)) == NULL)
-		SystemFatal("malloc");
+	int i, * sd, arg = 1, epoll_fd;
+	sd = malloc(sizeof(int) * connections);
+	static struct epoll_event events[EPOLL_QUEUE_LEN], event;
+	struct custom_data * cdata = malloc(sizeof(struct custom_data) * connections);
 	
-	pid[0] = getpid(); //parent is first process
-	
-	for(p = 1;p < connections;p++)
-	{
-		if((pid[p] = fork()) == -1)
-			SystemFatal("fork");
-		
-		if(pid[p] == 0){
-			//printf("Child: %d\n",getpid());
-			break;
-		}
-		else{
-			//parent continue generating children
-		}
-	}
-	
-	/**********************************************************
-	Create socket
-	**********************************************************/
-	
+	// Initialize server's sockaddr_in and hostent
 	struct sockaddr_in server;
 	struct hostent * hp;
-	int sd, arg = 1;
-	
-	if((sd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
-		SystemFatal("socket");
-		
-	// Set SO_REUSEADDR so port can be reused immediately
-	if(setsockopt(sd, SOL_SOCKET, SO_REUSEADDR, &arg, sizeof(arg)) == -1)
-		SystemFatal("setsockopt");
-	
 	memset(&server, 0, sizeof(struct sockaddr_in));
 	server.sin_family = AF_INET;
 	server.sin_port = htons(port);
 	if((hp = gethostbyname(host)) == NULL)
 		SystemFatal("gethostbyname");
-		
 	bcopy(hp->h_addr, (char *)&server.sin_addr, hp->h_length);
 	
-	/**********************************************************
-	Connect to server
-	**********************************************************/
-	
-	//char ** pptr, str[16];
-	
-	if(connect(sd, (struct sockaddr *)&server, sizeof(server)) == -1)
-		SystemFatal("connect");
+	// Create epoll file descriptor
+	if((epoll_fd = epoll_create(EPOLL_QUEUE_LEN)) == -1);
+		SystemFatal("epoll_create");
 		
-	printf("Connected: Server: %s\n", hp->h_name);
-	//pptr = hp->h_addr_list;
-	//printf("IP Address: %s\n", inet_ntop(hp->h_addrtype, *pptr, str, sizeof(str)));
+	// Create all sockets
+	for(i = 0; i < connections; i++){
+	
+		if((sd[i] = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+			SystemFatal("socket");
+		
+		// Set SO_REUSEADDR so port can be reused immediately
+		if(setsockopt(sd[i], SOL_SOCKET, SO_REUSEADDR, &arg, sizeof(arg)) == -1)
+			SystemFatal("setsockopt");
+		
+		// Make server socket non-blocking
+		if(fcntl(sd[i], F_SETFL, O_NONBLOCK | fcntl(sd[i], F_GETFL, 0)) == -1)
+			SystemFatal("fcntl");
+		
+		// Create data struct for each epoll descriptor
+		cdata[i].total = iterations;
+		cdata[i].sent = 0;
+		cdata[i].received = 0;
+		
+		// Add all sockets to epoll event loop
+		event.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP | EPOLLET;
+		event.data.fd = sd[i];
+		event.data.ptr = (void *)&cdata[i];
+		if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sd[i], &event) == -1)
+			SystemFatal("epoll_ctl");
+	}
+	
+	/**********************************************************
+	Enter epoll event loop
+	**********************************************************/
+	int num_fds,f,fin = 0;
+	
+	char rbuf[BUFLEN], sbuf[BUFLEN], * bp;
+	int bytes_to_read, n;
+	bp = rbuf;
+	bytes_to_read = BUFLEN;
+	strcpy(sbuf, data);	
+	
+	while(1){
+		fprintf(stdout,"Finished sockets: %d\n", fin);
+		num_fds = epoll_wait(epoll_fd, events, EPOLL_QUEUE_LEN, -1);
+		if(num_fds < 0)
+			SystemFatal("epoll_wait");
+			
+		for(f = 0;f < num_fds;f++){
+		
+			// EPOLLHUP
+			if(events[f].events & EPOLLHUP){
+				fprintf(stdout,"EPOLLHUP - closing fd: %d\n", events[f].data.fd);
+				close(events[f].data.fd);
+				continue;
+			}
+			
+			// EPOLLERR
+			if(events[f].events & EPOLLERR){
+				fprintf(stdout,"EPOLLERR - closing fd: %d\n", events[f].data.fd);
+				close(events[f].data.fd);
+				continue;
+			}
+			
+			// EPOLLIN
+			if(events[f].events & EPOLLIN){
+				fprintf(stdout,"EPOLLIN - fd: %d\n", events[f].data.fd);
+				
+				bp = rbuf;
+				bytes_to_read = BUFLEN;
+
+				//make repeated calls to recv until there is no more data
+				n = 0;
+				while((n = recv(events[f].data.fd,bp,bytes_to_read,0)) < BUFLEN){
+					bp += n;
+					bytes_to_read -= n;
+				}
+				
+				// Retrieve cdata
+				struct custom_data ptr = *(struct custom_data *)events[f].data.ptr;
+				
+				// Increment receive counter
+				ptr.received++;
+				printf("(%d) Transmitted and Received: %s\n",getpid(), rbuf);
+				
+				// All messages received, close socket
+				if(ptr.received == ptr.total){
+					close(events[f].data.fd);
+					fin++;
+				}
+			}
+			
+			// EPOLLIN
+			if(events[f].events & EPOLLOUT){
+				fprintf(stdout,"EPOLLOUT - fd: %d\n", events[f].data.fd);
+				
+				// Retrieve cdata
+				struct custom_data ptr = *(struct custom_data *)events[f].data.ptr;
+				
+				// Connect the socket if haven't already done so
+				if(ptr.sent == 0){
+				
+					//char ** pptr, str[16];
+	
+					if(connect(events[f].data.fd, (struct sockaddr *)&server, sizeof(server)) == -1)
+						SystemFatal("connect");
+		
+					printf("Connected: Server: %s\n", hp->h_name);
+					//pptr = hp->h_addr_list;
+					//printf("IP Address: %s\n", inet_ntop(hp->h_addrtype, *pptr, str, sizeof(str)));
+					
+				}
+				
+				// Send one message and increase counter	
+				if(ptr.sent < ptr.total){
+					send(events[f].data.fd, sbuf, BUFLEN, 0);
+					ptr.sent++;
+				}
+			}
+		}
+	}
+	
+	
+	
 	
 	/**********************************************************
 	Send and receive data
 	**********************************************************/
 	
-	char rbuf[BUFLEN], sbuf[BUFLEN], * bp;
+	/*char rbuf[BUFLEN], sbuf[BUFLEN], * bp;
 	int bytes_to_read, n;
 	
 	strcpy(sbuf, data);	
@@ -188,20 +279,16 @@ Usage: ./epoll_client\n\
 	fflush(stdout);
 	
 	//shutdown(sd, SHUT_RDWR);
-	close(sd);
+	close(sd);*/
 	
 	/**********************************************************
-	Wait for child processes and free memory
+	End epoll?
 	**********************************************************/
 
-	if(pid[0] == getpid()){
-		for(p = 1; p < connections; p++){
-			//printf("waiting for child: %d",pid[p]);
-			waitpid(pid[p],&status,0);
-		}
-		printf("Parent %d at end.\n",getpid());
-		free(pid);
-	}
+	/*for(i = 0; i < connections; i++){
+		free(sd[i]);
+		free(cdata[i];
+	}*/
 		
 	return 0;
 }
