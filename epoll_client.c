@@ -156,7 +156,9 @@ Usage: ./epoll_client\n\
 	/**********************************************************
 	Enter epoll event loop
 	**********************************************************/
-	int num_fds, f, bytes_to_read, n, timeout = 1000, fin = 0, e_err = 0, e_hup = 0, e_in = 0, e_out = 0,e_recv = 0;
+	int num_fds, f, bytes_to_read, n, s, timeout = 5000,
+		fin = 0, e_err = 0, e_hup = 0, e_in = 0, e_out = 0,
+		e_recv = 0, e_send = 0;
 	
 	char rbuf[BUFLEN], sbuf[BUFLEN];
 	
@@ -166,7 +168,7 @@ Usage: ./epoll_client\n\
 	while(1){
 		
 		// If all sockets are finished break out of while loop
-		fprintf(stdout,"fin: %d e_err: %d e_hup: %d e_in: %d e_out: %d e_recv: %d\n", fin, e_err,e_hup,e_in,e_out,e_recv);
+		fprintf(stdout,"fin: %d e_err: %d e_hup: %d e_in: %d e_out: %d e_recv: %d e_send: %d\n", fin, e_err,e_hup,e_in,e_out,e_recv,e_send);
 		if(fin == connections)
 			break;
 		
@@ -243,7 +245,7 @@ Usage: ./epoll_client\n\
 					// Call recv once for specified amount of data
 					n = recv(ptr->fd, rbuf, bytes_to_read,0);
 					
-					// Read one message with correct length
+					// Read fixed size message
 					if(n == BUFLEN){
 						e_recv++;
 						// Increment receive counter
@@ -264,7 +266,7 @@ Usage: ./epoll_client\n\
 						
 						break;
 					}
-					// Incorrect length message or zero length message 
+					// Wrong message size or zero-length message 
 					// or stream socket peer has performed an orderly shutdown
 					else{
 						break;
@@ -284,8 +286,23 @@ Usage: ./epoll_client\n\
 				// Send one message and increase counter	
 				if(ptr->sent == ptr->received && ptr->sent < ptr->total){
 				//if(ptr->sent < ptr->total){
-					send(ptr->fd, sbuf, BUFLEN, 0);
-					ptr->sent++;
+					s = 0;
+					s = send(ptr->fd, sbuf, BUFLEN, 0);
+					
+					// Send fixed size message
+					if(s == BUFLEN){
+						e_send++;
+						ptr->sent++;
+					}
+					else if(s == -1){
+						if(errno != EAGAIN && errno != EWOULDBLOCK)
+							perror("send");
+					}
+					// Wrong number of bytes sent
+					else{
+						;
+					}
+					
 				}
 				
 				// Remove EPOLL_OUT if all messages are sent
