@@ -285,7 +285,6 @@ Usage: ./epoll_client\n\
 				
 				// Send one message and increase counter	
 				if(ptr->sent == ptr->received && ptr->sent < ptr->total){
-				//if(ptr->sent < ptr->total){
 					s = 0;
 					s = send(ptr->fd, sbuf, BUFLEN, 0);
 					
@@ -297,6 +296,8 @@ Usage: ./epoll_client\n\
 					else if(s == -1){
 						if(errno != EAGAIN && errno != EWOULDBLOCK)
 							perror("send");
+						else
+							perror("send non block");
 					}
 					// Wrong number of bytes sent
 					else{
