@@ -70,6 +70,7 @@ int fd_server;
 stats * server_stats;
 int server_stat_len = 0;
 pthread_t t1;
+int print_debug = 0; 		// Print debug messages
 
 // Check if client exists in server_stats
 int client_exists(char * address){
@@ -139,21 +140,19 @@ void * print_loop(){
 		"Total_Data",\
 		"Data/s");
 		
-		printf("server_stat_len:%d\n",server_stat_len);
+		if(print_debug == 1)
+			printf("server_stat_len:%d\n",server_stat_len);
 		
 		for(c = 0;c < server_stat_len;c++){
 			// Pre stats
 			p1 = server_stats[c].total_conn;
 			p2 = server_stats[c].conn;
-			p3 = server_stats[c].total_msg;
-			p4 = server_stats[c].msg;
-			p5 = server_stats[c].total_data;
-			p6 = server_stats[c].data;
 			
-			// Process stats
-			// Add currents to totals
-			p3 += p4;
-			p5 += p6;
+			p4 = server_stats[c].msg;
+			p3 = server_stats[c].total_msg += p4;
+			
+			p6 = server_stats[c].data;
+			p5 = server_stats[c].total_data += p6;
 			
 			// Print stats
 			printf("%-15s%-15d%-15d%-15d%-15d%-15d%-15d\n",\
@@ -176,7 +175,7 @@ void * print_loop(){
 
 // Function prototypes
 static void SystemFatal (const char* message);
-static int ClearSocket (int fd);
+static int ClearSocket (int fd, stats * cstat);
 void close_fd (int);
 
 int main (int argc, char* argv[]) {
@@ -237,7 +236,9 @@ int main (int argc, char* argv[]) {
 	
 	if (epoll_ctl (epoll_fd, EPOLL_CTL_ADD, fd_server, &event) == -1) 
 	SystemFatal("epoll_ctl");
-    	
+    
+    stats * cstat;
+    
 	// Execute the epoll event loop
 	while (TRUE){
 		//struct epoll_event events[MAX_EVENTS];
@@ -246,12 +247,13 @@ int main (int argc, char* argv[]) {
 			SystemFatal ("epoll_wait");
 
 		for (i = 0; i < num_fds; i++){
-			stats * cstat;
+			
 			
     		// EPOLLHUP
     		if (events[i].events & EPOLLHUP){
 				//fputs("epoll: EPOLLERR", stderr);
-				fprintf(stdout,"EPOLLHUP - closing fd: %d\n", events[i].data.fd);
+				if(print_debug == 1)
+					fprintf(stdout,"EPOLLHUP - closing fd: %d\n", events[i].data.fd);
 				close(events[i].data.fd);
 				
 				// Update stats
@@ -262,7 +264,8 @@ int main (int argc, char* argv[]) {
 			
 			// EPOLLERR
 			if (events[i].events & EPOLLERR){
-				fprintf(stdout,"EPOLLERR - closing fd: %d\n", events[i].data.fd);
+				if(print_debug == 1)
+					fprintf(stdout,"EPOLLERR - closing fd: %d\n", events[i].data.fd);
 				close(events[i].data.fd);
 				
 				// Update stats
@@ -282,18 +285,12 @@ int main (int argc, char* argv[]) {
 					int fd_new = 0;
 					
 					fd_new = accept(fd_server, (struct sockaddr *)&in_addr, &in_len);
-					if (fd_new == -1) 
-					{
-						if (errno != EAGAIN && errno != EWOULDBLOCK) 
-						{
-							// If error in accept call
+					if (fd_new == -1){
+						// If error in accept call
+						if (errno != EAGAIN && errno != EWOULDBLOCK)
 							perror("accept");
-							break;								
-						}
-						else{
-							// All connections have been processed
-							break;
-						}
+						// All connections have been processed
+						break;
 					}
 					
 					// Get client stats
@@ -303,41 +300,47 @@ int main (int argc, char* argv[]) {
 					// Update stats
 					cstat->conn++;
 					cstat->total_conn++;
-					printf("total_conn:%d\n",cstat->total_conn);
+					if(print_debug == 1)
+						printf("total_conn:%d\n",cstat->total_conn);
 					
-					fprintf(stdout,"ACCEPTED NEW fd: %d\n", fd_new);
+					if(print_debug == 1)
+						fprintf(stdout,"ACCEPTED NEW fd: %d\n", fd_new);
 
 					// Make the fd_new non-blocking
 					if (fcntl (fd_new, F_SETFL, O_NONBLOCK | fcntl(fd_new, F_GETFL, 0)) == -1) 
 						SystemFatal("fcntl");
 				
 					// Add the new socket descriptor to the epoll loop
-					fprintf(stdout,"ADDING TO EPOLL fd: %d\n", fd_new);
+					if(print_debug == 1)
+						fprintf(stdout,"ADDING TO EPOLL fd: %d\n", fd_new);
 					
 					event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLET;
 					event.data.fd = fd_new;
 					if (epoll_ctl (epoll_fd, EPOLL_CTL_ADD, fd_new, &event) == -1) 
 						SystemFatal ("epoll_ctl");
 			
-					printf(" Remote Address:  %s\n", inet_ntoa(in_addr.sin_addr));
+					if(print_debug == 1)
+						printf(" Remote Address:  %s\n", inet_ntoa(in_addr.sin_addr));
 					continue;
 				}
     		}
     		// Else one of the sockets has read data
 			else{
 				// Get client stats
-				/*if((cstat = get_client_stats(events[i].data.fd)) == NULL)
-					SystemFatal("get_client_stats");*/
+				if((cstat = get_client_stats(events[i].data.fd)) == NULL)
+					SystemFatal("get_client_stats2");
 					
-				if (!ClearSocket(events[i].data.fd)){
+				if (!ClearSocket(events[i].data.fd, cstat)){
 				
 					// epoll will remove the fd from its set
 					// automatically when the fd is closed
-					fprintf(stdout,"CLOSING3 fd: %d\n", events[i].data.fd);
+					if(print_debug == 1)
+						fprintf(stdout,"CLOSING3 fd: %d\n", events[i].data.fd);
+					
 					close (events[i].data.fd);
 					
 					// Update stats
-					//cstat->conn--;
+					cstat->conn--;
 				}
 			}
 		}
@@ -348,7 +351,7 @@ int main (int argc, char* argv[]) {
 }
 
 
-static int ClearSocket (int fd) {
+static int ClearSocket (int fd, stats * cstat) {
 	int	n, bytes_to_read, m = 0;
 	char	*bp, buf[BUFLEN];
 		
@@ -363,12 +366,13 @@ static int ClearSocket (int fd) {
 		// Read fixed size message and echo back
 		if(n == BUFLEN){
 			m++;
-			printf ("sending:%s\n", buf);
+			if(print_debug == 1)
+				printf ("sending:%s\n", buf);
 			send (fd, buf, BUFLEN, 0);
 			
 			// Update stats
-			//cstat->msg++;
-			//cstat->data += n;
+			cstat->msg++;
+			cstat->data += n;
 		}
 		// No more messages or read error
 		else if(n == -1){
@@ -407,16 +411,15 @@ static int ClearSocket (int fd) {
 }
 
 // Prints the error stored in errno and aborts the program.
-static void SystemFatal(const char* message) 
-{
+static void SystemFatal(const char* message) {
     perror (message);
     exit (EXIT_FAILURE);
 }
 
 // Server closing function, signalled by CTRL-C
-void close_fd (int signo)
-{
-	printf("\n\nDone here\n\n");
+void close_fd (int signo){
+	if(print_debug == 1)
+		printf("\n\nDone here\n\n");
 	
 	// Close down thread, server socket
 	pthread_kill(t1,0);
