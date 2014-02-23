@@ -41,7 +41,7 @@ Purpose:	COMP 8005 Assignment 2 - Comparing Scalable Servers -
 
 // Globals
 int print_debug = 0;
-int e_send, e_recv;
+int e_send = 0, e_recv = 0;
 static void SystemFatal(const char* message);
 struct timeval start, end;
 
@@ -52,39 +52,42 @@ struct custom_data{
 	int received;	// Number of messages received
 };
 
+void print_helper(){
+	gettimeofday (&end, NULL);
+	
+	long bytes_sent = (long)e_send * BUFLEN;
+	//long bytes_recv = (long)e_recv * BUFLEN;
+	
+	float total_time = (float)(end.tv_sec - start.tv_sec) + ((float)(end.tv_usec - start.tv_usec)/1000000);
+
+	float avg_sent_msg_per_sec = (float)e_send/total_time;
+	float avg_sent_bytes_per_sec = (float)bytes_sent/total_time;
+
+	//float avg_time_per_recv_msg = total_time/(float)e_recv;
+	//float avg_time_per_recv_byte = total_time/(float)bytes_recv;
+	
+	printf("\r%-15d%-15ld%-15.3f%-15.3f%-15.3f",\
+	e_send,\
+	bytes_sent,\
+	total_time,\
+	avg_sent_msg_per_sec,\
+	avg_sent_bytes_per_sec);
+}
+
 // Print client live stats
-void print_loop(){
+void * print_loop(){
 
 	// Summary
 	printf("%-15s%-15s%-15s%-15s%-15s\n",\
 	"SentMsg",\
 	"SentBytes",\
 	"Time(s)",\
-	"AvgTime/Msg",\
-	"AvgTime/Byte");
+	"AvgMsg/s",\
+	"AvgByte/s");
 
 	while(1){
 		
-		gettimeofday (&end, NULL);
-	
-		long bytes_sent = (long)e_send * BUFLEN;
-		//long bytes_recv = (long)e_recv * BUFLEN;
-	
-		float total_time = (end.tv_sec - start.tv_sec) + ((end.tv_usec - start.tv_usec)/1000000);
-	
-		float avg_time_per_sent_msg = total_time/(float)e_send;
-		float avg_time_per_sent_byte = total_time/(float)bytes_sent;
-	
-		//float avg_time_per_recv_msg = total_time/(float)e_recv;
-		//float avg_time_per_recv_byte = total_time/(float)bytes_recv;
-	
-		
-		printf("\r%-15d%-15ld%-15.4f%-15.4f%-15.4f\n",\
-		e_send,\
-		bytes_sent,\
-		total_time,\
-		avg_time_per_sent_msg,\
-		avg_time_per_sent_byte);
+		print_helper();
 		
 		sleep(1);
 	}
@@ -209,7 +212,7 @@ Usage: ./epoll_client\n\
 	e_recv = 0;
 	e_send = 0;
 	
-	int pthread_t t1;
+	pthread_t t1;
 	pthread_create(&t1, NULL, &print_loop, NULL);
 	
 	char rbuf[BUFLEN], sbuf[BUFLEN];
@@ -433,6 +436,8 @@ Usage: ./epoll_client\n\
 	if(print_debug == 1)		
 		fprintf(stdout,"fin: %d e_err: %d e_hup: %d e_in: %d e_out: %d e_recv: %d e_send: %d\n", fin, e_err,e_hup,e_in,e_out,e_recv,e_send);
 	
+	print_helper();
+	printf("\n");
 	
 	free(sd);
 	free(event);
