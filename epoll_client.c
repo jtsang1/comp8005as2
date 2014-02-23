@@ -34,14 +34,16 @@ Purpose:	COMP 8005 Assignment 2 - Comparing Scalable Servers -
 
 #include <string.h>
 #include <sys/wait.h>
+#include <pthread.h>
 
 #define BUFLEN 800
 #define EPOLL_QUEUE_LEN 256 // Must be > 0. Only used for backward compatibility.
 
 // Globals
 int print_debug = 0;
-
+int e_send, e_recv;
 static void SystemFatal(const char* message);
+struct timeval start, end;
 
 struct custom_data{
 	int fd;
@@ -50,9 +52,45 @@ struct custom_data{
 	int received;	// Number of messages received
 };
 
-int main (int argc, char ** argv){
+// Print client live stats
+void print_loop(){
 
-	struct timeval start, end;
+	// Summary
+	printf("%-15s%-15s%-15s%-15s%-15s\n",\
+	"SentMsg",\
+	"SentBytes",\
+	"Time(s)",\
+	"AvgTime/Msg",\
+	"AvgTime/Byte");
+
+	while(1){
+		
+		gettimeofday (&end, NULL);
+	
+		long bytes_sent = (long)e_send * BUFLEN;
+		//long bytes_recv = (long)e_recv * BUFLEN;
+	
+		float total_time = (end.tv_sec - start.tv_sec) + ((end.tv_usec - start.tv_usec)/1000000);
+	
+		float avg_time_per_sent_msg = total_time/(float)e_send;
+		float avg_time_per_sent_byte = total_time/(float)bytes_sent;
+	
+		//float avg_time_per_recv_msg = total_time/(float)e_recv;
+		//float avg_time_per_recv_byte = total_time/(float)bytes_recv;
+	
+		
+		printf("\r%-15d%-15ld%-15.4f%-15.4f%-15.4f\n",\
+		e_send,\
+		bytes_sent,\
+		total_time,\
+		avg_time_per_sent_msg,\
+		avg_time_per_sent_byte);
+		
+		sleep(1);
+	}
+}
+
+int main (int argc, char ** argv){
 	
 	gettimeofday (&start, NULL);	
 
@@ -166,8 +204,13 @@ Usage: ./epoll_client\n\
 	Enter epoll event loop
 	**********************************************************/
 	int num_fds, f, bytes_to_read, n, s, timeout = 5000,
-		fin = 0, e_err = 0, e_hup = 0, e_in = 0, e_out = 0,
-		e_recv = 0, e_send = 0;
+		fin = 0, e_err = 0, e_hup = 0, e_in = 0, e_out = 0;
+	
+	e_recv = 0;
+	e_send = 0;
+	
+	int pthread_t t1;
+	pthread_create(&t1, NULL, &print_loop, NULL);
 	
 	char rbuf[BUFLEN], sbuf[BUFLEN];
 	
@@ -385,27 +428,11 @@ Usage: ./epoll_client\n\
 	/**********************************************************
 	End epoll?
 	**********************************************************/
-	// Summary
-	gettimeofday (&end, NULL);
+	pthread_kill(t1,0);
 	
-	long bytes_sent = (long)e_send * BUFLEN;
-	long bytes_recv = (long)e_recv * BUFLEN;
+	if(print_debug == 1)		
+		fprintf(stdout,"fin: %d e_err: %d e_hup: %d e_in: %d e_out: %d e_recv: %d e_send: %d\n", fin, e_err,e_hup,e_in,e_out,e_recv,e_send);
 	
-	float total_time = (end.tv_sec - start.tv_sec) + ((end.tv_usec - start.tv_usec)/1000000);
-	
-	float avg_time_per_sent_msg = total_time/(float)e_send;
-	float avg_time_per_sent_byte = total_time/(float)bytes_sent;
-	
-	float avg_time_per_recv_msg = total_time/(float)e_recv;
-	float avg_time_per_recv_byte = total_time/(float)bytes_recv;
-			
-	fprintf(stdout,"fin: %d e_err: %d e_hup: %d e_in: %d e_out: %d e_recv: %d e_send: %d\n", fin, e_err,e_hup,e_in,e_out,e_recv,e_send);
-	printf("SentMsg: %d SentBytes: %d Time(s): %f AvgTime/Msg: %f AvgTime/Byte: %f\n",\
-		e_send,\
-		bytes_sent,\
-		total_time,\
-		avg_time_per_sent_msg,\
-		avg_time_per_sent_byte);
 	
 	free(sd);
 	free(event);
