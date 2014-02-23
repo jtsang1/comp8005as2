@@ -35,7 +35,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <netdb.h>
-#include <strings.h>
+#include <string.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <signal.h>
@@ -49,8 +49,8 @@
 
 // Statistics for client
 typedef struct{
-	struct sockaddr_in address; // Client sockaddr_in 
-	
+	char ip_address[32];// Client IP address in decimals/dots notation
+	int port;			// Client port	
 	int	total_conn;		// Total connections made
 	int conn;			// Current connections
 	int total_msg;		// Total received messages from this client
@@ -61,8 +61,8 @@ typedef struct{
 
 // Socket Data
 typedef struct{
-	stats * cstat;
-	int sd;
+	char ip_address[32];// Socket peer address
+	int fd;				// Socket descriptor
 }cinfo;
 
 //Globals
@@ -70,26 +70,28 @@ int fd_server;
 stats * server_stats;
 int server_stat_len = 0;
 pthread_t t1;
-int print_debug = 0; 		// Print debug messages
+int print_debug = 0; 	// Print debug messages
 
 // Check if client exists in server_stats
 int client_exists(char * address){
 	int c;
 	for(c = 0;c < server_stat_len;c++){
-		if(address == inet_ntoa(server_stats->address.sin_addr)){
-			//printf("found!\n");
+		if((strcmp(address, server_stats[c].ip_address)) != 0){
+			if(print_debug == 1)
+				printf("found!\n");
 			return c;
 		}
 	}
-	//printf("not exist!\n");
+	if(print_debug == 1)
+		printf("not exist!\n");
 	return -1;
 }
 
 // Get pointer to client stats
-stats * get_client_stats(int socket){
+stats * get_client_stats(char * ip_address){
 	
 	// Get client's sockaddr_in
-	struct sockaddr addr;
+	/*struct sockaddr addr;
 	socklen_t size = sizeof(struct sockaddr);
 	if((getpeername(socket, &addr, &size)) == -1){
 		perror("getpeername");
@@ -102,11 +104,14 @@ stats * get_client_stats(int socket){
 	}
 	else
 		return NULL;
+	*/
 	
 	// Check if client exists. If so return it, otherwise
 	// create a new client and return it.
+	
 	int c;
-	if((c = client_exists(inet_ntoa(sin->sin_addr))) != -1){
+	//if((c = client_exists(inet_ntoa(sin->sin_addr))) != -1){
+	if((c = client_exists(ip_address)) != -1){
 		return &server_stats[c];
 	}
 	else{
@@ -114,6 +119,11 @@ stats * get_client_stats(int socket){
 		
 		if((server_stats = realloc((void *)server_stats, sizeof(stats) * c)) != NULL){
 			server_stat_len++;
+			
+			memset (server_stats[c - 1].ip_address, 0, 32);
+			// Copy address to server_stats
+			strcpy(server_stats[c - 1].ip_address,ip_address);
+			
 			return &server_stats[c - 1];
 		}
 	}
@@ -122,11 +132,6 @@ stats * get_client_stats(int socket){
 
 // Print live performance statistics while server is running
 // This is called in a loop
-void print_summary(){
-
-}
-
-// Print summary of performance statistics when the server is killed
 void * print_loop(){
 	int c = 0;
 	int p1 = 0,p2 = 0,p3 = 0,p4 = 0,p5 = 0,p6 = 0;
@@ -156,7 +161,7 @@ void * print_loop(){
 			
 			// Print stats
 			printf("%-15s%-15d%-15d%-15d%-15d%-15d%-15d\n",\
-			inet_ntoa(server_stats[c].address.sin_addr),\
+			server_stats[c].ip_address,\
 			p1,\
 			p2,\
 			p3,\
@@ -176,12 +181,12 @@ void * print_loop(){
 // Function prototypes
 static void SystemFatal (const char* message);
 static int ClearSocket (int fd, stats * cstat);
-void close_fd (int);
+void close_server (int);
 
 int main (int argc, char* argv[]) {
 
 	// Start the server stats loop
-	pthread_create(&t1, NULL,&print_loop,NULL);
+	pthread_create(&t1, NULL, &print_loop, NULL);
 
 	int i, arg; 
 	int num_fds, epoll_fd;
@@ -191,7 +196,7 @@ int main (int argc, char* argv[]) {
 	struct sigaction act;
 	
 	// set up the signal handler to close the server socket when CTRL-c is received
-    act.sa_handler = close_fd;
+    act.sa_handler = close_server;
     act.sa_flags = 0;
     if ((sigemptyset (&act.sa_mask) == -1 || sigaction (SIGINT, &act, NULL) == -1)){
         perror ("Failed to set SIGINT handler");
@@ -232,7 +237,9 @@ int main (int argc, char* argv[]) {
 	// Add the server socket to the epoll event loop
 	event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLET;
 	
-	event.data.fd = fd_server;
+	cinfo server_cinfo;
+	server_cinfo.fd = fd_server;
+	event.data.ptr = (void *)&server_cinfo;
 	
 	if (epoll_ctl (epoll_fd, EPOLL_CTL_ADD, fd_server, &event) == -1) 
 	SystemFatal("epoll_ctl");
@@ -248,99 +255,141 @@ int main (int argc, char* argv[]) {
 
 		for (i = 0; i < num_fds; i++){
 			
-			
     		// EPOLLHUP
     		if (events[i].events & EPOLLHUP){
-				//fputs("epoll: EPOLLERR", stderr);
+    			// Get socket cinfo
+    			cinfo * c_ptr = (cinfo *)events[i].data.ptr;
+    		
 				if(print_debug == 1)
-					fprintf(stdout,"EPOLLHUP - closing fd: %d\n", events[i].data.fd);
-				close(events[i].data.fd);
+					fprintf(stdout,"EPOLLHUP - closing fd: %d\n", c_ptr->fd);
+				
+				// Get client stats
+				if((cstat = get_client_stats(c_ptr->ip_address)) == NULL)
+					SystemFatal("get_client_stats");
+				
+				close(c_ptr->fd);
+				//free(c_ptr);
 				
 				// Update stats
-				//cstat->conn--;
+				cstat->conn--;
 				
 				continue;
 			}
 			
 			// EPOLLERR
 			if (events[i].events & EPOLLERR){
+				// Get socket cinfo
+    			cinfo * c_ptr = (cinfo *)events[i].data.ptr;
+			
 				if(print_debug == 1)
-					fprintf(stdout,"EPOLLERR - closing fd: %d\n", events[i].data.fd);
-				close(events[i].data.fd);
+					fprintf(stdout,"EPOLLERR - closing fd: %d\n", c_ptr->fd);
+				
+				// Get client stats
+				if((cstat = get_client_stats(c_ptr->ip_address)) == NULL)
+					SystemFatal("get_client_stats");
+				
+				close(c_ptr->fd);
+				//free(c_ptr);
 				
 				// Update stats
-				//cstat->conn--;
+				cstat->conn--;
 				
 				continue;
 			}
 			
     		assert (events[i].events & EPOLLIN);
-							
-    		// Server is receiving one or more incoming connection requests
-    		if (events[i].data.fd == fd_server){
-				while(1){
-								
-					struct sockaddr_in in_addr;
-					socklen_t in_len;
-					int fd_new = 0;
+    						
+    		// EPOLLIN
+    		if (events[i].events & EPOLLIN){
+    		
+    			// Get socket cinfo
+    			cinfo * c_ptr = (cinfo *)events[i].data.ptr;
+    			
+    			// Server is receiving one or more incoming connection requests
+				if (c_ptr->fd == fd_server){
 					
-					fd_new = accept(fd_server, (struct sockaddr *)&in_addr, &in_len);
-					if (fd_new == -1){
-						// If error in accept call
-						if (errno != EAGAIN && errno != EWOULDBLOCK)
-							perror("accept");
-						// All connections have been processed
-						break;
+					if(print_debug == 1)
+						printf("EPOLLIN-connect fd:%d\n",c_ptr->fd);
+				
+					while(1){
+								
+						struct sockaddr_in in_addr;
+						socklen_t in_len;
+						int fd_new = 0;
+						
+						memset (&in_addr, 0, sizeof (struct sockaddr_in));
+						fd_new = accept(fd_server, (struct sockaddr *)&in_addr, &in_len);
+						if (fd_new == -1){
+							// If error in accept call
+							if (errno != EAGAIN && errno != EWOULDBLOCK)
+								perror("accept");
+							// All connections have been processed
+							break;
+						}
+						
+						char * ip_address = inet_ntoa(in_addr.sin_addr);
+						
+						// Get new client stats
+						if((cstat = get_client_stats(ip_address)) == NULL)
+							SystemFatal("get_client_stats");
+					
+						// Update stats
+						cstat->conn++;
+						cstat->total_conn++;
+						
+						if(print_debug == 1)
+							printf("total_conn:%d\n",cstat->total_conn);
+					
+						if(print_debug == 1)
+							fprintf(stdout,"ACCEPTED NEW fd: %d\n", fd_new);
+
+						// Make the fd_new non-blocking
+						if (fcntl (fd_new, F_SETFL, O_NONBLOCK | fcntl(fd_new, F_GETFL, 0)) == -1) 
+							SystemFatal("fcntl");
+				
+						// Add the new socket descriptor to the epoll loop
+						if(print_debug == 1)
+							fprintf(stdout,"ADDING TO EPOLL fd: %d\n", fd_new);
+						
+						//struct epoll_event * client_event = malloc(sizeof(struct epoll_event));
+						event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLET;
+						
+						cinfo * client_info = malloc(sizeof(cinfo));
+						client_info->fd = fd_new;
+						strcpy(client_info->ip_address,ip_address);
+						event.data.ptr = (void *)client_info;
+						
+						if (epoll_ctl (epoll_fd, EPOLL_CTL_ADD, fd_new, &event) == -1) 
+							SystemFatal ("epoll_ctl");
+			
+						if(print_debug == 1)
+							printf(" Remote Address:  %s fd:%d\n", ip_address, ((cinfo*)event.data.ptr)->fd);
+						continue;
 					}
+				}
+				// Else one of the sockets has read data
+				else{
+				
+					if(print_debug == 1)
+						printf("EPOLLIN-read fd:%d\n",c_ptr->fd);
 					
 					// Get client stats
-					if((cstat = get_client_stats(fd_new)) == NULL)
-						SystemFatal("get_client_stats");
+					if((cstat = get_client_stats(c_ptr->ip_address)) == NULL)
+						SystemFatal("get_client_stats2");
 					
-					// Update stats
-					cstat->conn++;
-					cstat->total_conn++;
-					if(print_debug == 1)
-						printf("total_conn:%d\n",cstat->total_conn);
-					
-					if(print_debug == 1)
-						fprintf(stdout,"ACCEPTED NEW fd: %d\n", fd_new);
-
-					// Make the fd_new non-blocking
-					if (fcntl (fd_new, F_SETFL, O_NONBLOCK | fcntl(fd_new, F_GETFL, 0)) == -1) 
-						SystemFatal("fcntl");
+					if (!ClearSocket(c_ptr->fd, cstat)){
 				
-					// Add the new socket descriptor to the epoll loop
-					if(print_debug == 1)
-						fprintf(stdout,"ADDING TO EPOLL fd: %d\n", fd_new);
+						// epoll will remove the fd from its set
+						// automatically when the fd is closed
+						if(print_debug == 1)
+							fprintf(stdout,"CLOSING3 fd: %d\n", c_ptr->fd);
 					
-					event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLET;
-					event.data.fd = fd_new;
-					if (epoll_ctl (epoll_fd, EPOLL_CTL_ADD, fd_new, &event) == -1) 
-						SystemFatal ("epoll_ctl");
-			
-					if(print_debug == 1)
-						printf(" Remote Address:  %s\n", inet_ntoa(in_addr.sin_addr));
-					continue;
-				}
-    		}
-    		// Else one of the sockets has read data
-			else{
-				// Get client stats
-				if((cstat = get_client_stats(events[i].data.fd)) == NULL)
-					SystemFatal("get_client_stats2");
+						close(c_ptr->fd);
+						//free(c_ptr);
 					
-				if (!ClearSocket(events[i].data.fd, cstat)){
-				
-					// epoll will remove the fd from its set
-					// automatically when the fd is closed
-					if(print_debug == 1)
-						fprintf(stdout,"CLOSING3 fd: %d\n", events[i].data.fd);
-					
-					close (events[i].data.fd);
-					
-					// Update stats
-					cstat->conn--;
+						// Update stats
+						cstat->conn--;
+					}
 				}
 			}
 		}
@@ -387,6 +436,9 @@ static int ClearSocket (int fd, stats * cstat) {
 		}
 	}
 	
+	if(print_debug == 1)
+		printf ("sending m:%d\n", m);
+	
 	if(m == 0)
 		return FALSE;
 	else
@@ -417,7 +469,7 @@ static void SystemFatal(const char* message) {
 }
 
 // Server closing function, signalled by CTRL-C
-void close_fd (int signo){
+void close_server (int signo){
 	if(print_debug == 1)
 		printf("\n\nDone here\n\n");
 	
