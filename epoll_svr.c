@@ -44,7 +44,7 @@
 #define TRUE 				1
 #define FALSE 				0
 #define EPOLL_QUEUE_LEN		256
-#define BUFLEN				80
+#define BUFLEN				800
 #define SERVER_PORT			7000
 
 // Statistics for client
@@ -153,8 +153,11 @@ stats * get_client_stats(char * ip_address){
 void * print_loop(){
 	int c = 0;
 	int p1 = 0,p2 = 0,p3 = 0,p4 = 0,p5 = 0,p6 = 0;
+	char line[105];
+	for(c = 0;c < 105;c++)
+		line[c] = '-';
 	while(1){
-		printf("%-15s%-15s%-15s%-15s%-15s%-15s%-15s\n",\
+		printf("\n%-15s%-15s%-15s%-15s%-15s%-15s%-15s\n",\
 		"Client",\
 		"Total_Conn",\
 		"Active_Conn",\
@@ -162,6 +165,7 @@ void * print_loop(){
 		"Msg/s",\
 		"Total_Data",\
 		"Data/s");
+		printf("%s\n",line);
 		
 		if(print_debug == 2)
 			printf("server_stat_len:%d\n",server_stat_len);
