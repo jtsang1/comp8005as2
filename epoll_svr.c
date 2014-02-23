@@ -74,14 +74,18 @@ int print_debug = 0; 	// Print debug messages
 
 // Check if client exists in server_stats
 int client_exists(char * address){
+
 	int c;
 	for(c = 0;c < server_stat_len;c++){
-		if((strcmp(address, server_stats[c].ip_address)) != 0){
+		if(print_debug == 2)
+			printf("Comparing [%s] with [%s]\n",address, server_stats[c].ip_address);
+			
+		if((strcmp(address, server_stats[c].ip_address)) == 0){
 			if(print_debug == 1)
 				printf("found!\n");
 			return c;
 		}
-	}
+	}	
 	if(print_debug == 1)
 		printf("not exist!\n");
 	return -1;
@@ -89,7 +93,8 @@ int client_exists(char * address){
 
 // Get pointer to client stats
 stats * get_client_stats(char * ip_address){
-	
+	if(print_debug == 2)
+		printf("get_client_stats:%s!\n",ip_address);
 	// Get client's sockaddr_in
 	/*struct sockaddr addr;
 	socklen_t size = sizeof(struct sockaddr);
@@ -112,19 +117,32 @@ stats * get_client_stats(char * ip_address){
 	int c;
 	//if((c = client_exists(inet_ntoa(sin->sin_addr))) != -1){
 	if((c = client_exists(ip_address)) != -1){
+		
+		if(print_debug == 2)
+			printf("found2:%s!\n",ip_address);
 		return &server_stats[c];
+		
 	}
 	else{
-		c = sizeof(server_stats)/sizeof(stats) + 1;
 		
-		if((server_stats = realloc((void *)server_stats, sizeof(stats) * c)) != NULL){
+		if((server_stats = realloc((void *)server_stats, sizeof(stats) * (server_stat_len + 1))) != NULL){
 			server_stat_len++;
 			
-			memset (server_stats[c - 1].ip_address, 0, 32);
-			// Copy address to server_stats
-			strcpy(server_stats[c - 1].ip_address,ip_address);
+			if(print_debug == 2)
+				printf("Increased server_stat_len:%d\n", server_stat_len);
 			
-			return &server_stats[c - 1];
+			//Initialize server_stats
+			memset (server_stats[server_stat_len - 1].ip_address, 0, 32);
+			// Copy address to server_stats
+			strcpy(server_stats[server_stat_len - 1].ip_address,ip_address);
+			server_stats[server_stat_len - 1].total_conn = 0;
+			server_stats[server_stat_len - 1].conn = 0;
+			server_stats[server_stat_len - 1].total_msg = 0;
+			server_stats[server_stat_len - 1].msg = 0;
+			server_stats[server_stat_len - 1].total_data = 0;
+			server_stats[server_stat_len - 1].data = 0;
+			
+			return &server_stats[server_stat_len - 1];
 		}
 	}
 	return NULL;
@@ -145,7 +163,7 @@ void * print_loop(){
 		"Total_Data",\
 		"Data/s");
 		
-		if(print_debug == 1)
+		if(print_debug == 2)
 			printf("server_stat_len:%d\n",server_stat_len);
 		
 		for(c = 0;c < server_stat_len;c++){
@@ -317,7 +335,7 @@ int main (int argc, char* argv[]) {
 						socklen_t in_len;
 						int fd_new = 0;
 						
-						memset (&in_addr, 0, sizeof (struct sockaddr_in));
+						memset (&in_addr, 1, sizeof (struct sockaddr_in));
 						fd_new = accept(fd_server, (struct sockaddr *)&in_addr, &in_len);
 						if (fd_new == -1){
 							// If error in accept call
@@ -326,8 +344,9 @@ int main (int argc, char* argv[]) {
 							// All connections have been processed
 							break;
 						}
-						
 						char * ip_address = inet_ntoa(in_addr.sin_addr);
+						if(print_debug == 2)
+							printf("CONNECTED TO: %s\n",ip_address);
 						
 						// Get new client stats
 						if((cstat = get_client_stats(ip_address)) == NULL)
@@ -362,7 +381,7 @@ int main (int argc, char* argv[]) {
 						if (epoll_ctl (epoll_fd, EPOLL_CTL_ADD, fd_new, &event) == -1) 
 							SystemFatal ("epoll_ctl");
 			
-						if(print_debug == 1)
+						if(print_debug == 2)
 							printf(" Remote Address:  %s fd:%d\n", ip_address, ((cinfo*)event.data.ptr)->fd);
 						continue;
 					}
