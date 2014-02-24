@@ -56,35 +56,48 @@ void print_helper(){
 	gettimeofday (&end, NULL);
 	
 	long bytes_sent = (long)e_send * BUFLEN;
-	//long bytes_recv = (long)e_recv * BUFLEN;
+	long bytes_recv = (long)e_recv * BUFLEN;
 	
 	float total_time = (float)(end.tv_sec - start.tv_sec) + ((float)(end.tv_usec - start.tv_usec)/1000000);
 
-	float avg_sent_msg_per_sec = (float)e_send/total_time;
-	float avg_sent_bytes_per_sec = (float)bytes_sent/total_time;
-
-	//float avg_time_per_recv_msg = total_time/(float)e_recv;
-	//float avg_time_per_recv_byte = total_time/(float)bytes_recv;
+	//float avg_sent_msg_per_sec = (float)e_send/total_time;
+	//float avg_sent_bytes_per_sec = (float)bytes_sent/total_time;
 	
-	printf("\r%-15d%-15ld%-15.3f%-15.3f%-15.3f",\
+	float avg_recv_msg_per_sec = (float)e_recv/total_time;
+	float avg_recv_bytes_per_sec = (float)bytes_recv/total_time;
+	float avg_sec_per_recv_msg = total_time/(float)e_recv;
+	
+	printf("\r%-8.3f%-10d%-13ld%-10d%-13ld%-13.3f%-15.3f%-9.7f",\
+	total_time,\
 	e_send,\
 	bytes_sent,\
-	total_time,\
-	avg_sent_msg_per_sec,\
-	avg_sent_bytes_per_sec);
+	e_recv,\
+	bytes_recv,\
+	avg_recv_msg_per_sec,\
+	avg_recv_bytes_per_sec,\
+	avg_sec_per_recv_msg);
 }
 
 // Print client live stats
 void * print_loop(){
-
+	int c;
+	char line[92];
+	for(c = 0;c < 91;c++)
+		line[c] = '-';
+	line[c] = '\0';
+	
 	// Summary
-	printf("%-15s%-15s%-15s%-15s%-15s\n",\
+	printf("\n%-8s%-10s%-13s%-10s%-13s%-13s%-15s%-9s\n",\
+	"Time(s)",\
 	"SentMsg",\
 	"SentBytes",\
-	"Time(s)",\
+	"RecvMsg",\
+	"RecvBytes",\
 	"AvgMsg/s",\
-	"AvgByte/s");
-
+	"AvgByte/s",\
+	"AvgRTT(s)");
+	printf("%s\n",line);
+	
 	while(1){
 		
 		print_helper();
@@ -207,7 +220,7 @@ Usage: ./epoll_client\n\
 	Enter epoll event loop
 	**********************************************************/
 	int num_fds, f, bytes_to_read, n, s, timeout = 5000,
-		fin = 0, e_err = 0, e_hup = 0, e_in = 0, e_out = 0;
+		fin = 0, e_err = 0, e_hup = 0, e_conn = 0, e_in = 0, e_out = 0;
 	
 	e_recv = 0;
 	e_send = 0;
@@ -224,7 +237,7 @@ Usage: ./epoll_client\n\
 		
 		// If all sockets are finished break out of while loop
 		if(print_debug == 1)
-			fprintf(stdout,"fin: %d e_err: %d e_hup: %d e_in: %d e_out: %d e_recv: %d e_send: %d\n", fin, e_err,e_hup,e_in,e_out,e_recv,e_send);
+			fprintf(stdout,"fin: %d e_err: %d e_hup: %d e_conn: %d e_in: %d e_out: %d e_recv: %d e_send: %d\n", fin, e_err,e_hup,e_conn,e_in,e_out,e_recv,e_send);
 		if(fin == connections)
 			break;
 		
@@ -272,6 +285,14 @@ Usage: ./epoll_client\n\
 						else
 							SystemFatal("connect");
 					}
+					
+					int sock_error = 0;
+					socklen_t len = sizeof(sock_error);
+					
+					getsockopt(ptr->fd, SOL_SOCKET, SO_ERROR, &sock_error, &len);
+					if (sock_error == 0)
+						e_conn++;
+					
 					
 					if(print_debug == 1)
 						printf("Connected: Server: %s\n", hp->h_name);
@@ -433,11 +454,11 @@ Usage: ./epoll_client\n\
 	**********************************************************/
 	pthread_kill(t1,0);
 	
-	if(print_debug == 1)		
-		fprintf(stdout,"fin: %d e_err: %d e_hup: %d e_in: %d e_out: %d e_recv: %d e_send: %d\n", fin, e_err,e_hup,e_in,e_out,e_recv,e_send);
-	
 	print_helper();
 	printf("\n");
+	
+	if(print_debug == 1)		
+		fprintf(stdout,"fin: %d e_err: %d e_hup: %d e_conn: %d e_in: %d e_out: %d e_recv: %d e_send: %d\n", fin, e_err,e_hup,e_conn,e_in,e_out,e_recv,e_send);
 	
 	free(sd);
 	free(event);

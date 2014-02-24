@@ -40,6 +40,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <pthread.h>
+#include <sys/time.h>
 
 #define TRUE 				1
 #define FALSE 				0
@@ -53,10 +54,12 @@ typedef struct{
 	int port;			// Client port	
 	int	total_conn;		// Total connections made
 	int conn;			// Current connections
-	int total_msg;		// Total received messages from this client
-	int msg;			// Current messages
-	int total_data;		// Total data received from this client
-	int	data;			// Current data
+	long total_msg;		// Total received messages from this client
+	long msg;			// Current messages
+	long total_data;	// Total data received from this client
+	long data;			// Current data
+	long send_errors;	// Server send errors
+	long recv_errors;	// Server recv errors
 }stats;
 
 // Socket Data
@@ -71,6 +74,7 @@ stats * server_stats;
 int server_stat_len = 0;
 pthread_t t1;
 int print_debug = 0; 	// Print debug messages
+struct timeval start, end;
 
 // Check if client exists in server_stats
 int client_exists(char * address){
@@ -141,6 +145,8 @@ stats * get_client_stats(char * ip_address){
 			server_stats[server_stat_len - 1].msg = 0;
 			server_stats[server_stat_len - 1].total_data = 0;
 			server_stats[server_stat_len - 1].data = 0;
+			server_stats[server_stat_len - 1].send_errors = 0;
+			server_stats[server_stat_len - 1].recv_errors = 0;
 			
 			return &server_stats[server_stat_len - 1];
 		}
@@ -152,19 +158,32 @@ stats * get_client_stats(char * ip_address){
 // This is called in a loop
 void * print_loop(){
 	int c = 0;
-	int p1 = 0,p2 = 0,p3 = 0,p4 = 0,p5 = 0,p6 = 0;
-	char line[105];
-	for(c = 0;c < 105;c++)
+	int p1 = 0,p2 = 0;
+	long p3 = 0,p4 = 0,p5 = 0,p6 = 0, p7 = 0,p8 = 0;
+	
+	int t1 = 0, t2 = 0;
+	long t3 = 0,t4 = 0,t5 = 0,t6 = 0,t7 = 0,t8 = 0;
+	
+	char line[108];
+	for(c = 0;c < 107;c++)
 		line[c] = '-';
+	line[c] = '\0';
+	
 	while(1){
-		printf("\n%-15s%-15s%-15s%-15s%-15s%-15s%-15s\n",\
-		"Client",\
-		"Total_Conn",\
-		"Active_Conn",\
-		"Total_Msg",\
+	
+		gettimeofday (&end, NULL);	
+		float total_time = (float)(end.tv_sec - start.tv_sec) + ((float)(end.tv_usec - start.tv_usec)/1000000);
+		printf("\nElapsed Time: %.3fs\n",total_time);
+		printf("%-14s%-14s%-14s%-14s%-14s%-14s%-14s%-5s%-5s\n",\
+		"Clients",\
+		"TotalConn",\
+		"ActiveConn",\
+		"RecvMsg",\
 		"Msg/s",\
-		"Total_Data",\
-		"Data/s");
+		"RecvByte",\
+		"Byte/s",\
+		"RxEr",\
+		"TxEr");
 		printf("%s\n",line);
 		
 		if(print_debug == 2)
@@ -172,30 +191,59 @@ void * print_loop(){
 		
 		for(c = 0;c < server_stat_len;c++){
 			// Pre stats
-			p1 = server_stats[c].total_conn;
-			p2 = server_stats[c].conn;
+			t1 += p1 = server_stats[c].total_conn;
+			t2 += p2 = server_stats[c].conn;
 			
-			p4 = server_stats[c].msg;
-			p3 = server_stats[c].total_msg += p4;
+			t4 += p4 = server_stats[c].msg;
+			t3 += p3 = server_stats[c].total_msg;
 			
-			p6 = server_stats[c].data;
-			p5 = server_stats[c].total_data += p6;
+			t6 += p6 = server_stats[c].data;
+			t5 += p5 = server_stats[c].total_data;
+			
+			t7 += p7 = server_stats[c].recv_errors;
+			t8 += p8 = server_stats[c].send_errors;
 			
 			// Print stats
-			printf("%-15s%-15d%-15d%-15d%-15d%-15d%-15d\n",\
+			printf("%-14s%-14d%-14d%-14ld%-14ld%-14ld%-14ld%-5ld%-5ld\n",\
 			server_stats[c].ip_address,\
 			p1,\
 			p2,\
 			p3,\
 			p4,\
 			p5,\
-			p6);
+			p6,\
+			p7,\
+			p8);
 			
 			// Post stats
 			server_stats[c].msg = 0;
 			server_stats[c].data = 0;
 		}
 		
+		// Print totals
+		printf("%-14s%-14d%-14d%-14ld%-14ld%-14ld%-14ld%-5ld%-5ld\n\n",\
+		"Total",\
+		t1,\
+		t2,\
+		t3,\
+		t4,\
+		t5,\
+		t6,\
+		t7,\
+		t8);
+
+		// Reset totals
+		t1 = 0;
+		t2 = 0;
+		t3 = 0;
+		t4 = 0;
+		t5 = 0;
+		t6 = 0;
+		t7 = 0;
+		t8 = 0;
+		
+		
+	
 		sleep(1);
 	}
 }
@@ -207,6 +255,8 @@ void close_server (int);
 
 int main (int argc, char* argv[]) {
 
+	gettimeofday (&start, NULL);
+	
 	// Start the server stats loop
 	pthread_create(&t1, NULL, &print_loop, NULL);
 
@@ -422,9 +472,8 @@ int main (int argc, char* argv[]) {
 	exit (EXIT_SUCCESS);
 }
 
-
 static int ClearSocket (int fd, stats * cstat) {
-	int	n, bytes_to_read, m = 0;
+	int	n,l, bytes_to_read, m = 0;
 	char	*bp, buf[BUFLEN];
 		
 	bp = buf;
@@ -440,20 +489,29 @@ static int ClearSocket (int fd, stats * cstat) {
 			m++;
 			if(print_debug == 1)
 				printf ("sending:%s\n", buf);
-			send (fd, buf, BUFLEN, 0);
+			l = send(fd, buf, BUFLEN, 0);
+			if(l == -1){
+				cstat->send_errors++;
+			}
 			
 			// Update stats
 			cstat->msg++;
+			cstat->total_msg++;
 			cstat->data += n;
+			cstat->total_data += n;
 		}
 		// No more messages or read error
 		else if(n == -1){
-			if(errno != EAGAIN && errno != EWOULDBLOCK)
+			if(errno != EAGAIN && errno != EWOULDBLOCK){
 				perror("recv");
+				// Update stats
+				cstat->recv_errors++;
+			}
+			
 			break;
 		}
 		// Wrong message size or zero-length message
-		// stream socket peer has performed an orderly shutdown
+		// Stream socket peer has performed an orderly shutdown
 		else{
 			break;
 		}
