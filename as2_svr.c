@@ -468,6 +468,12 @@ void* Child(void* arg) {
 }
 
 void* select_svr(int userPort) {
+
+	gettimeofday (&start, NULL);
+	
+	// Start the server stats loop
+	pthread_create(&t1, NULL, &print_loop, NULL);
+
     int i, maxi, nready, arg, t;
     int listen_sd, new_sd, sockfd, maxfd, client[FD_SETSIZE];
     struct sockaddr_in server, client_addr;
@@ -484,7 +490,7 @@ void* select_svr(int userPort) {
     } else {
         port = userPort; // Use the defined port
     }
-    printf("%d", FD_SETSIZE);
+    //printf("%d", FD_SETSIZE);
 
     // Create a stream socket
     if ((listen_sd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
@@ -515,19 +521,19 @@ void* select_svr(int userPort) {
         client[i] = -1; // -1 indicates available entry
     FD_ZERO(&allset);
     FD_SET(listen_sd, &allset);
-
+	
+	stats * cstat;
 
     while (TRUE) {
         rset = allset; // structure assignment
         nready = select(maxfd + 1, &rset, NULL, NULL, NULL);
 
-        if (FD_ISSET(listen_sd, &rset)) // new client connection
-        {
+        if (FD_ISSET(listen_sd, &rset)){ // new client connection
             client_len = sizeof (client_addr);
             if ((new_sd = accept(listen_sd, (struct sockaddr *) &client_addr, &client_len)) == -1)
                 SystemFatal("accept error");
 
-            printf(" Remote Address:  %s\n", inet_ntoa(client_addr.sin_addr));
+            //printf(" Remote Address:  %s\n", inet_ntoa(client_addr.sin_addr));
 
             for (i = 0; i < FD_SETSIZE; i++)
                 if (client[i] < 0) {
@@ -546,12 +552,25 @@ void* select_svr(int userPort) {
             if (i > maxi)
                 maxi = i; // new max index in client[] array
 
+
+			
+			
+			// Get new client stats
+			char * ip_address = inet_ntoa(client_addr.sin_addr);
+			//printf("CONNECTED TO: %s\n",ip_address);
+			if((cstat = get_client_stats(ip_address)) == NULL)
+				SystemFatal("get_client_stats");
+			cstat->total_conn++;
+			cstat->conn++;
+
             if (--nready <= 0)
                 continue; // no more readable descriptors
         }
 
         for (i = 0; i <= maxi; i++) // check all clients for data
         {
+        	
+        	
             if ((sockfd = client[i]) < 0)
                 continue;
 
@@ -560,7 +579,30 @@ void* select_svr(int userPort) {
                 if (n == BUFLEN) {
                     write(sockfd, buf, BUFLEN); // echo to client
                     //printf("(sockfd: %d)Sending: %s\n", sockfd, buf);
+					
+					// Get client's sockaddr_in
+					struct sockaddr addr;
+					socklen_t size = sizeof(struct sockaddr);
+					if((getpeername(sockfd, &addr, &size)) == -1){
+						SystemFatal("getpeername");
+					}
 
+					struct sockaddr_in * sin;
+					if(addr.sa_family == AF_INET){
+						sin = (struct sockaddr_in *)&addr;
+					}
+					else
+						SystemFatal("not ip4");
+					
+					// Get client stats
+					char * ip_address = inet_ntoa(sin->sin_addr);
+					if((cstat = get_client_stats(ip_address)) == NULL)
+						SystemFatal("get_client_stats");
+					cstat->msg++;
+				   	cstat->total_msg++;
+				   	cstat->data += n;
+					cstat->total_data += n;
+									
                 }
 
                 if (n == 0) // connection closed by client
